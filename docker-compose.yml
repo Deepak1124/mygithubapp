@@ -1,0 +1,14 @@
+version: '2.2'
+
+services:
+  mygithubrepo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - GITHUB_CLIENT_ID
+      - GITHUB_CLIENT_SECRET
+      - SESSION_KEY
+    restart: always
+    ports:
+      - 8080:8080

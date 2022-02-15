@@ -10,37 +10,19 @@ import (
 	"github.com/labstack/gommon/log"
 )
 
-// var (
-// 	key   = []byte("super-secret-key")
-// 	Store = sessions.NewCookieStore(key)
-// )
-
 func initialize() *mux.Router {
 	r := mux.NewRouter()
 
 	r.HandleFunc("/github/listRepo", auth(handleapis.GithubListRepository)).Methods("GET")
-	// r.HandleFunc("github/createRepo", handleapis.GithubCreateRepositoryController).Methods("POST")
-	// r.HandleFunc("github/getRepo", handleapis.GithubGetRepositoryController).Methods("GET")
-	// r.HandleFunc("github/createBranch", handleapis.GithubCreateBranchController).Methods("POST")
-	// r.HandleFunc("github/createPullRequest", handleapis.GithubCreatePullRequestController).Methods("POST")
-	// r.HandleFunc("github/createContent", handleapis.GithubCreateContentRequestController).Methods("POST")
+	r.HandleFunc("/github/createRepo", auth(handleapis.GithubCreateRepo)).Methods("POST")
+	r.HandleFunc("/github/getRepo", auth(handleapis.GithubGetRepo)).Methods("GET")
+	r.HandleFunc("/github/createBranch", auth(handleapis.GithubCreateBranch)).Methods("POST")
+	r.HandleFunc("/github/createPullRequest", auth(handleapis.CreateGithubPullRequest)).Methods("POST")
+	r.HandleFunc("/github/createContent", auth(handleapis.CreateRepositoryContent)).Methods("POST")
 
 	r.HandleFunc("/login", handleapis.GithubLogin).Methods("GET")
 	r.HandleFunc("/callback/handler", handleapis.GithubLoginCallbackHandler).Methods("GET")
 
-	// t.GET("login", infrastructure.GithubLoginController)
-	// t.GET("callback/handler", infrastructure.GithubCallbackHandlerController)
-
-	// t := e.Group("/")
-	// t.Use(SessionAuth())
-	// t.GET("github/listRepo", handleapis.GitListRepositoryController)
-	// t.POST("github/createRepo", handleapis.GithubCreateRepositoryController)
-	// t.GET("github/getRepo", handleapis.GithubGetRepositoryController)
-	// t.POST("github/createBranch", handleapis.GithubCreateBranchController)
-	// t.POST("github/createPullRequest", handleapis.GithubCreatePullRequestController)
-	// t.POST("github/createContent", handleapis.GithubCreateContentRequestController)
-
-	// 	Serve = r
 	return r
 }
 
@@ -52,11 +34,11 @@ func auth(HandlerFunc http.HandlerFunc) http.HandlerFunc {
 		}
 		_, ok := sess.Values["access_token"]
 		if !ok {
-			fmt.Println("acces token nahi mila in main55, so redirecting to login")
+			fmt.Println("acces token found, so redirecting to login")
 			http.Redirect(w, r, "/login", 302)
 			return
 		}
-		fmt.Println("acces token mila in main59, so redirecting to listrepo")
+		fmt.Println("acces token not found, so redirecting to listrepo")
 		HandlerFunc.ServeHTTP(w, r)
 	}
 }

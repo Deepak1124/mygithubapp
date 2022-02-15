@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 
@@ -78,8 +79,7 @@ func GithubListRepository(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 	}
 	repos, _, err := client.Repositories.List(ctx, "", nil)
-	// TODO get branch and add to output list
-	//repo, resp, err := client.Repositories.GetBranch(ctx, userName, param.Name)
+
 	repoList := make([]githubRepositoryListOutput, len(repos))
 	i := 0
 	for j := range repos {
@@ -92,8 +92,6 @@ func GithubListRepository(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 	}
 	jsonResponse, _ := json.Marshal(repoList)
-	// return c.JSON(http.StatusOK, repoList)
-	fmt.Println(repoList)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -101,28 +99,186 @@ func GithubListRepository(w http.ResponseWriter, r *http.Request) {
 }
 
 // GithubCreateRepo create a repo under auth user
-func GithubCreateRepo(w http.ResponseWriter, r *http.Request) error {
+func GithubCreateRepo(w http.ResponseWriter, r *http.Request) {
 	var param createRepoParam
 	client, err := createGithubClient(r)
 	if err != nil {
-		return err
+		http.Error(w, err.Error(), http.StatusNotFound)
 	}
-	err = c.Bind(&param)
+
+	body, _ := ioutil.ReadAll(r.Body)
+	err = json.Unmarshal(body, &param)
 	if err != nil {
-		return err
-	}
-	err = c.Validate(param)
-	if err != nil {
-		return err
+		http.Error(w, err.Error(), http.StatusNotFound)
 	}
 	repo := github.Repository{
 		Name: &param.RepoName,
 	}
+	log.Info("params in creating repo", param)
 	repos, _, err := client.Repositories.Create(ctx, "", &repo)
+	log.Info("repos in creating repos", repos)
 	if err != nil {
-		return err
+		http.Error(w, err.Error(), http.StatusNotFound)
 	}
-	return c.JSON(http.StatusCreated, repos)
+	jsonResponse, _ := json.Marshal(repos)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(jsonResponse)
+}
+
+//Github GetRepo endpoint to get repo
+func GithubGetRepo(w http.ResponseWriter, r *http.Request) {
+	client, err := createGithubClient(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+	}
+
+	keys, ok := r.URL.Query()["name"]
+
+	if !ok || len(keys[0]) < 1 {
+		http.Error(w, err.Error(), http.StatusNotFound)
+	}
+
+	repoName := keys[0]
+
+	if repoName == "" {
+		http.Error(w, err.Error(), http.StatusNotFound)
+	}
+	userName, _, _ := client.Users.Get(ctx, "")
+	repo, resp, err := client.Repositories.Get(ctx, *userName.Login, repoName)
+	if err != nil {
+		log.Error(err)
+		if resp.StatusCode == 404 {
+			http.Error(w, "Repo not found", http.StatusNotFound)
+		} else {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		}
+	}
+	jsonResponse, _ := json.Marshal(repo)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(jsonResponse)
+}
+
+// GithubCreateBranch endpoint to create branch
+func GithubCreateBranch(w http.ResponseWriter, r *http.Request) {
+	var param createBranchParam
+	client, err := createGithubClient(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+	}
+	body, _ := ioutil.ReadAll(r.Body)
+	err = json.Unmarshal(body, &param)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+	}
+
+	if param.SourceBranchName == "" {
+		param.SourceBranchName = "main"
+	}
+	userName, _, _ := client.Users.Get(ctx, "")
+	sourceBranchRefString := fmt.Sprintf("refs/heads/%s", param.SourceBranchName)
+	sourceBranchRef, resp, err := client.Git.GetRef(ctx, *userName.Login, param.RepoName, sourceBranchRefString)
+	if err != nil {
+		log.Error(err)
+		if resp.StatusCode == 404 {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		} else {
+			http.Error(w, "", http.StatusOK)
+		}
+	}
+	newBranchRefString := fmt.Sprintf("refs/heads/%s", param.DestinationBranchName)
+	*sourceBranchRef.Ref = newBranchRefString
+	newBranchRef, resp, err := client.Git.CreateRef(ctx, *userName.Login, param.RepoName, sourceBranchRef)
+	if err != nil {
+		log.Error(err)
+		if resp.StatusCode == 404 {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		} else {
+			http.Error(w, "", http.StatusOK)
+		}
+	}
+	log.Info(fmt.Sprintf("Branch %s Created Successfully", param.DestinationBranchName))
+
+	jsonResponse, _ := json.Marshal(newBranchRef)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(jsonResponse)
+}
+
+// CreateGithubPullRequest endpoint to create pull request
+func CreateGithubPullRequest(w http.ResponseWriter, r *http.Request) {
+	var param createPullRequestParam
+	client, err := createGithubClient(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+	}
+	body, _ := ioutil.ReadAll(r.Body)
+	err = json.Unmarshal(body, &param)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+	}
+
+	createPullRequest := &github.NewPullRequest{
+		Title: &param.PrSubject,
+		Head:  &param.Head,
+		Base:  &param.Base,
+	}
+	userName, _, _ := client.Users.Get(ctx, "")
+	repo, _, err := client.PullRequests.Create(ctx, *userName.Login, param.RepoName, createPullRequest)
+	if err != nil {
+		log.Error(err.Error())
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+	}
+	log.Info("PullRequest Created Successfully")
+
+	jsonResponse, _ := json.Marshal(repo)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(jsonResponse)
+}
+
+// CreateRepositoryContent creates a file with base64 content and commit using the message
+func CreateRepositoryContent(w http.ResponseWriter, r *http.Request) {
+	var createFileParam createFileContentParam
+	client, err := createGithubClient(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+	}
+	body, _ := ioutil.ReadAll(r.Body)
+	err = json.Unmarshal(body, &createFileParam)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+	}
+	repositoryFileContent := &github.RepositoryContentFileOptions{
+		Message: &createFileParam.Message,
+		Content: []byte(createFileParam.FileContent),
+		Branch:  &createFileParam.BranchName,
+	}
+	if createFileParam.Path == "" {
+		createFileParam.Path = createFileParam.FileName
+	}
+	userName, _, _ := client.Users.Get(ctx, "")
+	content, resp, err := client.Repositories.CreateFile(ctx, *userName.Login, createFileParam.RepoName, createFileParam.Path,
+		repositoryFileContent)
+	if err != nil {
+		log.Error(err.Error())
+		if resp.StatusCode == http.StatusNotFound {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		} else if resp.StatusCode == http.StatusConflict {
+			http.Error(w, err.Error(), http.StatusConflict)
+		} else {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		}
+	}
+	jsonResponse, _ := json.Marshal(content)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(jsonResponse)
 }
 
 // GithubLogin is to login in github using oauth
@@ -145,9 +301,7 @@ func GithubLogin(w http.ResponseWriter, r *http.Request) {
 		"https://github.com/login/oauth/authorize?client_id=%s&scope=repo", githubClientID,
 	)
 	log.Info("Redirect URL", redirectURL)
-	// http.Redirect(res, req, fmt.Sprintf("https://%s%s", req.Host, req.URL), http.StatusPermanentRedirect)
 	http.Redirect(w, r, redirectURL, http.StatusPermanentRedirect)
-	// return c.Redirect(http.StatusTemporaryRedirect, redirectURL)
 }
 
 // // GithubLoginCallbackHandler to store access_token in session
@@ -156,7 +310,7 @@ func GithubLoginCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 	}
-	log.Info("Github access token mil gayaa in GithubLoginCallbackHandler 135", githubAccessToken)
+	log.Info("Github access token found", githubAccessToken)
 	sess, err := domain.Get(r)
 	if err != nil {
 		panic(err)
@@ -169,7 +323,7 @@ func GithubLoginCallbackHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// sess.Save(c.Request(), c.Response())
+
 	log.Info("Call back handler done")
 	http.Redirect(w, r, "/github/listRepo", http.StatusTemporaryRedirect)
 }
